@@ -17,8 +17,8 @@ snapshotted and restored.
 | Release / namespace | `csi-driver-nfs` in `csi-driver-nfs` |
 | Controller replicas | 2 (HA), `runOnControlPlane=true`, RollingUpdate |
 | External snapshotter | enabled; CRDs **not** re-created (OpenShift ships them) |
-| NFS server | `control01.syangsao.net` (`192.168.40.26`) |
-| Export path | `/var/lib/nfs/exports/openshift` |
+| NFS server | `nas01-80.syangsao.lab` (`192.168.80.20`, VLAN 80 / `bond0.80`) |
+| Export path | `/nfsshare/csidriver` |
 | StorageClass | `nfs-csi` (default) |
 | VolumeSnapshotClass | `csi-nfs-snapclass` |
 
@@ -29,39 +29,25 @@ Running images confirmed: `nfsplugin:v4.13.4`, `csi-provisioner:v6.3.0`,
 
 ## 1. NFS server (prerequisite)
 
-luke had no running NFS server, so one was set up on **control01**. The export must
-live on a **writable** filesystem — on RHCOS the root `/` is read-only, so use
-`/var/lib/nfs/exports/...` (on `/dev/sda4`, writable).
+The NFS server is the **NAS** at `nas01-80.syangsao.lab` (`192.168.80.20`), reachable
+on VLAN 80 — the `bond0.80` interface created by the NNCPs in
+[networking.md](networking.md). The export is `/nfsshare/csidriver`.
+
+> This NAS is an existing external server; it is **not** set up on a cluster node.
+> (An earlier attempt used a control01 export, but the intended target is the NAS.)
+
+Verify reachability from a cluster node:
 
 ```bash
-# Run on control01 (via oc debug node or direct access)
-mkdir -p /var/lib/nfs/exports/openshift
-chmod 755 /var/lib/nfs/exports/openshift
-chown -R nfsnobody:nfsnobody /var/lib/nfs/exports/openshift
-
-# Export to all hosts (internal lab network)
-echo "/var/lib/nfs/exports/openshift *(insecure,no_root_squash,async,rw)" > /etc/exports
-
-# Start + enable the NFS server
-systemctl enable --now nfs-server
-exportfs -av
-
-# Verify
-showmount -e localhost
-# /var/lib/nfs/exports/openshift  *
+# From any node that has bond0.80 (control01/control02)
+getent hosts nas01-80.syangsao.lab        # → 192.168.80.20
+mkdir -p /tmp/nas-test
+mount -t nfs nas01-80.syangsao.lab:/nfsshare/csidriver /tmp/nas-test   # MOUNT OK
+touch /tmp/nas-test/.w && rm /tmp/nas-test/.w && umount /tmp/nas-test  # WRITE OK
 ```
 
-Verify reachability from another node:
-
-```bash
-# From control02
-mkdir -p /tmp/nfs-test
-mount -t nfs 192.168.40.26:/var/lib/nfs/exports/openshift /tmp/nfs-test
-touch /tmp/nfs-test/f && rm /tmp/nfs-test/f && umount /tmp/nfs-test   # WRITE OK
-```
-
-> `nfs-utils` was already present on the RHCOS nodes (`rpc.nfsd`, `exportfs`). The
-> export path is stable across rebuilds only if you recreate it — see Rebuild notes.
+> The default NFSv3 mount works. If a share is v4-only, add `mountOptions: ["nfsvers=4.1"]`
+> to the StorageClass (see the `-2`/`-3` variants in `~/mtv/nfs-csi/`).
 
 ---
 
@@ -98,9 +84,8 @@ helm install csi-driver-nfs csi-driver-nfs/csi-driver-nfs --version 4.13.4 \
 ```
 
 > **Version note:** the guide pins `--version 4.11.0`. luke was installed with the
-> latest, **4.13.4** (the same flags). If you later want to track the guide exactly,
-> use 4.11.0; otherwise stay on the latest and re-run `helm repo update` +
-> `helm upgrade` periodically.
+> latest, **4.13.4** (the same flags). To track the guide exactly use 4.11.0;
+> otherwise stay on the latest and re-run `helm repo update` + `helm upgrade`.
 
 Expected pods after install (all `Running`):
 
@@ -122,8 +107,8 @@ oc adm policy add-scc-to-user privileged -z csi-nfs-controller-sa -n csi-driver-
 
 ## 6. StorageClass — [`storageclass.yaml`](../storageclass.yaml)
 
-References the `nfs.csi.k8s.io` provisioner and points at the luke NFS server/export.
-Marked as the **default** StorageClass.
+References the `nfs.csi.k8s.io` provisioner and points at the NAS export. Marked as
+the **default** StorageClass. This is the file from `~/mtv/nfs-csi/storageclass.yaml`.
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -134,8 +119,8 @@ metadata:
     storageclass.kubernetes.io/is-default-class: "true"   # must be a string, not bool
 provisioner: nfs.csi.k8s.io
 parameters:
-  server: 192.168.40.26                                  # control01 internal IP
-  share: /var/lib/nfs/exports/openshift                  # NFS export path
+  server: nas01-80.syangsao.lab                           # NAS on VLAN 80 (192.168.80.20)
+  share: /nfsshare/csidriver                              # NAS export path
   subDir: ${pvc.metadata.namespace}-${pvc.metadata.name}-${pv.metadata.name}
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
@@ -144,17 +129,26 @@ allowVolumeExpansion: True
 
 ```bash
 oc apply -f storageclass.yaml
-# If your NFS server is v4-only, add:  mountOptions: ["nfsvers=4.1"]
 oc get storageclass        # nfs-csi (default)
 ```
 
-> **Pitfall hit on luke:** the `is-default-class` annotation value must be the string
-> `"true"`. Writing it as a bare YAML boolean (`true`) makes `oc apply` fail with
+> **Pitfall 1 — annotation type:** the `is-default-class` value must be the string
+> `"true"`. A bare YAML boolean makes `oc apply` fail with
 > `json: cannot unmarshal bool into ... annotations of type string`.
+>
+> **Pitfall 2 — parameters are immutable:** Kubernetes forbids updating a StorageClass's
+> `parameters` in place (`updates to parameters are forbidden`). To change the server/share,
+> delete the StorageClass (and any PVCs/PVs using it) and re-apply. This is what happened
+> when switching from a control01 export to the NAS.
+
+> **Other shares** (not deployed on luke by default): `~/mtv/nfs-csi/` also holds
+> `storageclass.yaml-2` (`nfs-csidriver2` → `nas01-80:/csidriver2`, NFS 4.1) and
+> `storageclass.yaml-3` (`nfs-csidriver3` → `mirror.syangsao.net:/csidriver`, non-default,
+> NFS 4.1). Only the default `nfs-csi` was applied here.
 
 ## 7. VolumeSnapshotClass — [`snapshotclass.yaml`](../snapshotclass.yaml)
 
-Required to create snapshots.
+Required to create snapshots. This is the file from `~/mtv/nfs-csi/snapshotclass.yaml`.
 
 ```yaml
 apiVersion: snapshot.storage.k8s.io/v1
@@ -195,8 +189,7 @@ oc get pvc -n csi-driver-nfs     # test-nfs  Bound  RWX  nfs-csi
 ### Write data, snapshot, restore
 
 ```bash
-# 1) Write a file via a pod mounting the PVC (image: ubi9/ubi-minimal)
-#    → /data/test.txt
+# 1) Write a file via a pod mounting the PVC (image: ubi9/ubi-minimal) → /data/test.txt
 
 # 2) Snapshot the PVC
 cat <<'EOF' | oc apply -f -
@@ -207,7 +200,7 @@ spec:
   volumeSnapshotClassName: csi-nfs-snapclass
   source: { persistentVolumeClaimName: test-nfs }
 EOF
-oc get volumesnapshot -n csi-driver-nfs   # READYTOUSE=true, RESTORESIZE=170
+oc get volumesnapshot -n csi-driver-nfs   # READYTOUSE=true
 
 # 3) Restore into a new PVC via dataSource
 cat <<'EOF' | oc apply -f -
@@ -227,21 +220,22 @@ EOF
 # Mount test-nfs-restored in a pod → /data/test.txt matches the original. ✓
 ```
 
-**Result on luke:** PVC `test-nfs` Bound; snapshot `test-nfs-snap` `readyToUse=true`
-(restore size 170 bytes); restored PVC `test-nfs-restored` returned the identical
-file contents. Full round-trip passed.
+**Result on luke (NAS-backed):** PVC `test-nfs` Bound; snapshot `test-nfs-snap`
+`readyToUse=true`; restored PVC `test-nfs-restored` returned the identical file
+contents. Full round-trip passed against `nas01-80:/nfsshare/csidriver`.
 
 ---
 
 ## Rebuild notes
 
-- **NFS server** is the only non-cluster-managed piece: recreate
-  `/var/lib/nfs/exports/openshift` + `/etc/exports` + `systemctl enable --now
-  nfs-server` on control01 after a rebuild (RHCOS wipes `/etc` and `/var` changes).
+- **NFS server** is external (the NAS) — nothing to recreate on cluster nodes. After a
+  rebuild, just confirm `nas01-80.syangsao.lab` resolves and the `/nfsshare/csidriver`
+  export is reachable from the nodes that carry `bond0.80`.
 - **Helm release** is idempotent — re-run the `helm install` (or `helm upgrade`) with
   the same flags to restore the driver. The SCC grants (§5) must be re-applied if the
   namespace/ServiceAccounts are recreated.
-- **StorageClass / SnapshotClass** (`oc apply -f`) are idempotent.
+- **StorageClass / SnapshotClass** (`oc apply -f`) are idempotent. Remember parameters
+  are immutable — delete + re-apply to change server/share.
 - The test PVCs/snapshot from §8 can be deleted after a rebuild; they exist only as
   proof of the round-trip.
 
@@ -249,5 +243,5 @@ file contents. Full round-trip passed.
 
 | Path | Purpose |
 |------|---------|
-| [`storageclass.yaml`](../storageclass.yaml) | `nfs-csi` default StorageClass → luke NFS server |
+| [`storageclass.yaml`](../storageclass.yaml) | `nfs-csi` default StorageClass → NAS `nas01-80:/nfsshare/csidriver` |
 | [`snapshotclass.yaml`](../snapshotclass.yaml) | `csi-nfs-snapclass` VolumeSnapshotClass |

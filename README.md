@@ -60,7 +60,7 @@ oc apply -f luke-network-config.yaml
 | [`docs/operators.md`](docs/operators.md) | Install nmstate, virt (HCO), and mtv operators via OLM subscriptions. |
 | [`docs/networking.md`](docs/networking.md) | How the NNCPs are configured: bridges, VLANs, OVN localnet mapping, NADs. |
 | [`docs/nfs-csi.md`](docs/nfs-csi.md) | csi-driver-nfs install (Helm, Option 1), StorageClass + SnapshotClass, PVC/snapshot round-trip. |
-| [`storageclass.yaml`](storageclass.yaml) | `nfs-csi` default StorageClass → luke NFS server (control01). |
+| [`storageclass.yaml`](storageclass.yaml) | `nfs-csi` default StorageClass → NAS `nas01-80:/nfsshare/csidriver`. |
 | [`snapshotclass.yaml`](snapshotclass.yaml) | `csi-nfs-snapclass` VolumeSnapshotClass for NFS snapshots. |
 
 ## Prerequisites for this runbook
