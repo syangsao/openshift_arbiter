@@ -28,6 +28,7 @@ artifact so the whole thing can be re-applied idempotently after a rebuild.
 1. [API & ingress TLS certificates](docs/certs.md)
 2. [Operators: virt, mtv, nncp](docs/operators.md)
 3. [Node network configuration (NNCP)](docs/networking.md)
+4. [NFS CSI driver (RWX storage + snapshots)](docs/nfs-csi.md)
 
 ## Quick reference — restore after rebuild
 
@@ -58,6 +59,9 @@ oc apply -f luke-network-config.yaml
 | [`docs/certs.md`](docs/certs.md) | API server named cert + default ingress (apps) wildcard cert, ACME/ZeroSSL. |
 | [`docs/operators.md`](docs/operators.md) | Install nmstate, virt (HCO), and mtv operators via OLM subscriptions. |
 | [`docs/networking.md`](docs/networking.md) | How the NNCPs are configured: bridges, VLANs, OVN localnet mapping, NADs. |
+| [`docs/nfs-csi.md`](docs/nfs-csi.md) | csi-driver-nfs install (Helm, Option 1), StorageClass + SnapshotClass, PVC/snapshot round-trip. |
+| [`storageclass.yaml`](storageclass.yaml) | `nfs-csi` default StorageClass → luke NFS server (control01). |
+| [`snapshotclass.yaml`](snapshotclass.yaml) | `csi-nfs-snapclass` VolumeSnapshotClass for NFS snapshots. |
 
 ## Prerequisites for this runbook
 

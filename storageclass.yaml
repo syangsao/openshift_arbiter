@@ -1,0 +1,15 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: 192.168.40.26
+  share: /var/lib/nfs/exports/openshift
+  subDir: ${pvc.metadata.namespace}-${pvc.metadata.name}-${pv.metadata.name}
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: True
