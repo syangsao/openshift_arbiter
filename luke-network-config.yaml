@@ -1,0 +1,215 @@
+# Luke cluster network configuration (saved 2026-09-17 before rebuild)
+# Apply with: oc apply -f luke-network-config.yaml
+
+---
+# NNCP: OVS bridge for VM data (all nodes)
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: br-vmdata
+spec:
+  desiredState:
+    interfaces:
+    - bridge:
+        allow-extra-patch-ports: true
+        options:
+          stp: false
+        port:
+        - name: bond0
+      description: "A dedicated OVS bridge with bond0 as a port allowing all VLANs and untagged traffic."
+      name: br-vmdata
+      state: up
+      type: ovs-bridge
+
+---
+# NNCP: NFS VLAN interfaces on control01 (VLAN 80 + 90)
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: control01-nfs-nncp
+spec:
+  desiredState:
+    interfaces:
+    - ipv4:
+        address:
+        - ip: 192.168.80.26
+          prefix-length: 24
+        dhcp: false
+        enabled: true
+      mtu: 1500
+      name: bond0.80
+      state: up
+      type: vlan
+      vlan:
+        base-iface: bond0
+        id: 80
+    - ipv4:
+        address:
+        - ip: 192.168.90.26
+          prefix-length: 24
+        dhcp: false
+        enabled: true
+      ipv6:
+        enabled: false
+      mtu: 1500
+      name: bond0.90
+      state: up
+      type: vlan
+      vlan:
+        base-iface: bond0
+        id: 90
+  maxUnavailable: 1
+  nodeSelector:
+    kubernetes.io/hostname: control01.syangsao.net
+
+---
+# NNCP: NFS VLAN interfaces on control02 (VLAN 80 + 90)
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: control02-nfs-nncp
+spec:
+  desiredState:
+    interfaces:
+    - ipv4:
+        address:
+        - ip: 192.168.80.27
+          prefix-length: 24
+        dhcp: false
+        enabled: true
+      mtu: 1500
+      name: bond0.80
+      state: up
+      type: vlan
+      vlan:
+        base-iface: bond0
+        id: 80
+    - ipv4:
+        address:
+        - ip: 192.168.90.27
+          prefix-length: 24
+        dhcp: false
+        enabled: true
+      ipv6:
+        enabled: false
+      mtu: 1500
+      name: bond0.90
+      state: up
+      type: vlan
+      vlan:
+        base-iface: bond0
+        id: 90
+  maxUnavailable: 1
+  nodeSelector:
+    kubernetes.io/hostname: control02.syangsao.net
+
+---
+# NNCP: VLAN 60 for VM networking (worker nodes) - OVS bridge + OVN bridge mapping
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: vlan60-virtualnetwork
+spec:
+  desiredState:
+    interfaces:
+    - description: vlan using bond0
+      name: bond0.60
+      state: up
+      type: vlan
+      vlan:
+        base-iface: bond0
+        id: 60
+    - bridge:
+        allow-extra-patch-ports: true
+        options:
+          stp: false
+        port:
+        - name: bond0.60
+      description: OVS bridge for VLAN 60
+      name: ovs-br-vlan-60
+      state: up
+      type: ovs-bridge
+    ovn:
+      bridge-mappings:
+      - bridge: ovs-br-vlan-60
+        localnet: vlan-60
+        state: present
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+
+---
+# NNCP: Jumbo frames on arbiter (OVN overlay MTU)
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: arbiter-ext-mtu
+  labels:
+    purpose: ovn-overlay-mtu
+spec:
+  desiredState:
+    interfaces:
+    - mtu: 1500
+      name: ens192
+      state: up
+      type: ethernet
+    - mtu: 1500
+      name: bond0
+      state: up
+      type: ovs-interface
+    - mtu: 1500
+      name: br-ex
+      state: up
+      type: ovs-bridge
+  maxUnavailable: 0
+  nodeSelector:
+    kubernetes.io/hostname: arbiter.syangsao.net
+
+---
+# NAD: vlan-60 in default namespace (OVN localnet - used by existing VMs)
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: vlan-60
+  namespace: default
+  annotations:
+    description: VLAN 60 connection for VMs
+    k8s.ovn.org/network-id: "5"
+    k8s.ovn.org/network-name: vlan-60
+spec:
+  config: |-
+    {
+      "cniVersion": "0.3.1",
+      "name": "vlan-60",
+      "type": "ovn-k8s-cni-overlay",
+      "topology": "localnet",
+      "netAttachDefName": "default/vlan-60",
+      "mtu" : 1500,
+      "ipam": {}
+    }
+
+---
+# NAD: vlan-60 in mtv-test namespace (macvlan bridge - for MTV migration target)
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: vlan-60
+  namespace: mtv-test
+spec:
+  config: |-
+    {
+      "cniVersion": "0.3.1",
+      "name": "vlan-60",
+      "plugins": [
+        {
+          "type": "macvlan",
+          "master": "eth1",
+          "mode": "bridge",
+          "ipam": {
+            "type": "host-local",
+            "subnet": "192.168.60.0/24",
+            "rangeStart": "192.168.60.10",
+            "rangeEnd": "192.168.60.250"
+          }
+        }
+      ]
+    }
