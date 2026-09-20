@@ -5,6 +5,25 @@ Node networking is managed declaratively with **NodeNetworkConfigurationPolicy**
 (NAD) resources for OVN/multus. The canonical set lives in
 [`../luke-network-config.yaml`](../luke-network-config.yaml) — apply it as a unit:
 
+> **Prerequisite — NMState instance:** the nmstate operator only registers the
+> `NodeNetworkConfigurationPolicy` CRD after an `NMState` custom resource exists.
+> On a fresh install the operator pod runs but creates just the `nmstates` CRD and
+> waits; applying the NNCPs fails with `no matches for kind
+> "NodeNetworkConfigurationPolicy" in version "nmstate.io/v1"`. Create the default
+> instance first (idempotent):
+
+```bash
+cat <<'EOF' | oc apply -f -
+apiVersion: nmstate.io/v1
+kind: NMState
+metadata:
+  name: cluster
+spec: {}
+EOF
+# confirm the CRD is now registered before applying the NNCPs:
+oc get crd nodenetworkconfigurationpolicies.nmstate.io
+```
+
 ```bash
 # mtv-test namespace is required by the macvlan NAD
 oc create namespace mtv-test --dry-run=client -o yaml | oc apply -f -

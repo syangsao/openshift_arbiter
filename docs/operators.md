@@ -20,6 +20,28 @@ a rebuild restores the exact same versions.
 
 Provides the `NodeNetworkConfigurationPolicy` (NNCP) CRD used to configure node
 networking declaratively.
+> **Prerequisite — OperatorGroup:** OLM will not resolve a Subscription in a
+> namespace that has no `OperatorGroup`. The three namespaces below
+> (`openshift-nmstate`, `openshift-cnv`, `openshift-mtv`) are **not** auto-provisioned
+> with one on OpenShift, so create each before (or right after) its Subscription.
+> Without it the catalog-operator logs `sync ... failed: found 0 operatorGroups,
+> expected 1` and no InstallPlan/CSV is ever created.
+
+```bash
+for ns in openshift-nmstate openshift-cnv openshift-mtv; do
+  cat <<EOF | oc apply -f -
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: ${ns}-group
+  namespace: ${ns}
+spec:
+  targetNamespaces:
+    - ${ns}
+EOF
+done
+```
+
 
 ```bash
 oc create namespace openshift-nmstate --dry-run=client -o yaml | oc apply -f -
