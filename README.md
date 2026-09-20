@@ -29,6 +29,7 @@ artifact so the whole thing can be re-applied idempotently after a rebuild.
 2. [Operators: virt, mtv, nncp](docs/operators.md)
 3. [Node network configuration (NNCP)](docs/networking.md)
 4. [NFS CSI driver (RWX storage + snapshots)](docs/nfs-csi.md)
+5. [GitOps (Argo CD) — install all of the above via git](docs/gitops.md)
 
 ## Quick reference — restore after rebuild
 
@@ -58,8 +59,8 @@ oc apply -f luke-network-config.yaml
 | [`luke-network-config.yaml`](luke-network-config.yaml) | Canonical NNCP + NAD set — the single source of truth for node networking. Apply with `oc apply -f`. |
 | [`docs/certs.md`](docs/certs.md) | API server named cert + default ingress (apps) wildcard cert, ACME/ZeroSSL. |
 | [`docs/operators.md`](docs/operators.md) | Install nmstate, virt (HCO), and mtv operators via OLM subscriptions. |
-| [`docs/networking.md`](docs/networking.md) | How the NNCPs are configured: bridges, VLANs, OVN localnet mapping, NADs. |
 | [`docs/nfs-csi.md`](docs/nfs-csi.md) | csi-driver-nfs install (Helm, Option 1), StorageClass + SnapshotClass, PVC/snapshot round-trip. |
+| [`docs/gitops.md`](docs/gitops.md) | Drive the day-2 operator installs through Argo CD (GitOps) — apps, RBAC, sync order, and what's still missing. |
 | [`storageclass.yaml`](storageclass.yaml) | `nfs-csi` default StorageClass → NAS `nas01-80:/nfsshare/csidriver`. |
 | [`snapshotclass.yaml`](snapshotclass.yaml) | `csi-nfs-snapclass` VolumeSnapshotClass for NFS snapshots. |
 
