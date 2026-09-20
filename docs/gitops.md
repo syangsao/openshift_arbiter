@@ -22,14 +22,11 @@ bootstrap after a rebuild.
 | virt/HCO operator | `virt-operator` | `operators/virt` | ns + OperatorGroup + Subscription |
 | HyperConverged instance (data plane) | `virt-instance` | `operators/virt-instance` | deploys KubeVirt/CDI/SSP/AAQ |
 | NFS CSI driver | `nfs-csi` | `operators/nfs-csi` | kustomize: controller + node + snapshotter + RBAC |
+| MTV operator (Forklift) | `mtv-operator` | `operators/mtv` | ns + OperatorGroup + Subscription (channel `release-v2.12`) |
+| NNCPs + NADs (node networking) | `luke-networking` | *(arbiter repo)* `luke-network-config.yaml` | cluster-scoped; sync *after* `nmstate-instance` so the NNCP CRD exists |
 
-**Not yet covered by Argo CD (still manual):**
+**Still manual (not ArgoCD-managed):**
 
-- **MTV operator** — no `mtv` dir or app in `openshift_gitops`. Add one (see
-  [§5](#5-missing-add-the-mtv-app)).
-- **NNCPs + NADs** (`luke-network-config.yaml`) — cluster-scoped node networking;
-  no app. Add a `networking` app pointing at the arbiter repo (see
-  [§6](#6-missing-add-a-networking-nncp--nad-app)).
 - **TLS certificates** — see [§7](#7-certs-gitops-friendly-or-not). Secrets +
   IngressController/APIServer patches; doable via ArgoCD but the ACME issuance
   stays external.
@@ -122,37 +119,20 @@ oc get kubevirt cdi ssp -n openshift-cnv --no-headers           # Deployed
 oc get pods -n csi-driver-nfs --no-headers                       # Running
 ```
 
-## 5. MISSING — add the MTV app
+## 5. MTV operator app
 
-`openshift_gitops` has no MTV coverage. Add `operators/mtv/` (namespace,
-OperatorGroup, Subscription — same shape as `operators/nmstate/`) and an
-`operators/argocd-applications/mtv-operator-app.yaml`:
+`operators/mtv/` in `openshift_gitops` (namespace, OperatorGroup, Subscription —
+same shape as `operators/nmstate/`) plus `argocd-applications/mtv-operator-app.yaml`
+and `mtv-rbac.yaml`. The Subscription pins `channel: release-v2.12`,
+`startingCSV: mtv-operator.v2.12.8` (see [operators.md §3](operators.md#3-migration-toolkit-for-virtualization-mtv)).
+The OperatorGroup is included — required on a fresh rebuild, see
+[operators.md](operators.md).
 
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata: { name: mtv-operator, namespace: openshift-gitops }
-spec:
-  project: default
-  source:
-    repoURL: 'https://github.com/syangsao/openshift_gitops.git'
-    targetRevision: main
-    path: operators/mtv
-  destination: { server: 'https://kubernetes.default.svc', namespace: openshift-mtv }
-  syncPolicy:
-    automated: { prune: true, selfHeal: true }
-    syncOptions: [ CreateNamespace=true ]
-```
+## 6. Networking (NNCP + NAD) app
 
-The Subscription is the one from [operators.md §3](operators.md#3-migration-toolkit-for-virtualization-mtv)
-(`channel: release-v2.12`, `startingCSV: mtv-operator.v2.12.8`). Remember the
-OperatorGroup prerequisite (see [operators.md](operators.md)).
-
-## 6. MISSING — add a networking (NNCP + NAD) app
-
-The NNCPs and NADs in [`luke-network-config.yaml`](../luke-network-config.yaml) are
-cluster-scoped node networking with no ArgoCD app. Add one that points at the
-**arbiter** repo (where the canonical artifact lives):
+`argocd-applications/luke-networking-app.yaml` (+ `luke-networking-rbac.yaml`) in
+`openshift_gitops` sources the canonical NNCP + NAD set from the **arbiter** repo
+where the artifact lives:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -163,7 +143,7 @@ spec:
   source:
     repoURL: 'https://github.com/syangsao/openshift_arbiter.git'
     targetRevision: main
-    path: .                       # or a dedicated networking/ dir
+    path: luke-network-config.yaml   # the 5 NNCPs + 2 NADs
   destination: { server: 'https://kubernetes.default.svc' }   # cluster-scoped
   syncPolicy:
     automated: { prune: true, selfHeal: true }
@@ -203,8 +183,9 @@ cd openshift_gitops && ./scripts/install-gitops-operator.sh
 for f in operators/argocd-applications/*-rbac.yaml; do oc apply -f "$f"; done
 for f in operators/argocd-applications/*-app.yaml;   do oc apply -f "$f"; done
 
-# 3) sync operators, then instances (see §3)
-# 4) add mtv + networking apps first (§5, §6), then sync them
-# 5) certs: manual per certs.md, or GitOps-managed secrets (§7)
-# 6) verify: argocd app get all → all Synced+Healthy
+# 3) sync operators (incl. mtv), then instances, then networking (see §3)
+#    order: nmstate-operator → virt-operator → mtv-operator → nfs-csi
+#           → nmstate-instance → virt-instance → luke-networking
+# 4) certs: manual per certs.md, or GitOps-managed secrets (§7)
+# 5) verify: argocd app get all → all Synced+Healthy
 ```
