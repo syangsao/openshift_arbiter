@@ -136,6 +136,28 @@ oc get kubevirt cdi ssp -n openshift-cnv -w
 > `metadata.annotations.deployOVS: "false"` only if you need to match that exact
 > initialization behavior.
 
+### 2b. CDI worker pod resources (importer/upload/clone) — configure via HCO, not the CDI CR
+
+CDI worker pods (`importer-*`, `uploader-*`, clone helpers) default to a **600M memory limit**. Large disk imports (100+ GiB, e.g. MTV cold-migration targets) OOM-kill the importer mid-transfer in a restart loop (exit 137 every ~60–90s). The setting lives at `spec.config.podResourceRequirements` on the CDI CR — **but HCO owns that field and silently reverts direct edits** to `cdi-kubevirt-hyperconverged` (watch for `Overwritten CDI cdi-kubevirt-hyperconverged` events in `openshift-cnv`). The supported path is the HCO CR, which propagates it down:
+
+```bash
+# Set CDI worker pod resources via the HCO CR (applied on luke Oct 6 2026):
+oc patch hyperconverged kubevirt-hyperconverged -n openshift-cnv --type merge \
+  --patch '{"spec":{"storage":{"workloadResourceRequirements":{
+    "requests":{"cpu":"250m","memory":"512Mi"},
+    "limits":{"cpu":"2","memory":"2Gi"}}}}}'
+
+# Verify it propagated to the CDI CR:
+oc get cdi cdi-kubevirt-hyperconverged -n openshift-cnv \
+  -o jsonpath='{.spec.config.podResourceRequirements}{"\n"}'
+# → {"limits":{"cpu":"2","memory":"2Gi"},"requests":{"cpu":"250m","memory":"512Mi"}}
+```
+
+Notes:
+- This is **cluster-wide** for all CDI worker pods — size it deliberately on multi-tenant clusters (high requests make every transfer harder to schedule; high limits let many concurrent transfers exhaust a node).
+- Already-running importer pods keep the old limits until deleted; `oc delete pod importer-<name> -n <target-ns>` restarts one with the new values.
+- Symptom/fix walkthrough for the OOM loop (with exporter-side evidence) is in the `openshift_mtv` repo, Troubleshooting → "Importer pod OOM-killed".
+
 ---
 
 ## 3. Migration Toolkit for Virtualization (MTV)
@@ -201,6 +223,7 @@ done
 ## Rebuild note
 
 All three subscriptions are idempotent — re-applying the same `startingCSV` after a
-rebuild restores the identical operator versions. The only non-idempotent piece is
-the `HyperConverged` instance (§2a), which must be (re)created to deploy the virt
-data plane.
+rebuild restores the identical operator versions. The non-idempotent pieces are the
+`HyperConverged` instance (§2a), which must be (re)created to deploy the virt data
+plane, and its `spec.storage.workloadResourceRequirements` patch (§2b), which must be
+re-applied after rebuild — HCO resets the CDI worker pod resources to defaults otherwise.
