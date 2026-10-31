@@ -228,6 +228,13 @@ contents. Full round-trip passed against `nas01-80:/nfsshare/csidriver`.
 
 ## Rebuild notes
 
+> **Fresh-install note (observed 2026-10-31):** the `mtv-test/vlan-60` NAD in
+> [`luke-network-config.yaml`](../luke-network-config.yaml) is created by the same
+> `oc apply`, and on a fresh cluster its multus validating webhook can time out
+> (`admission plugin "ValidatingAdmissionWebhook" failed to complete validation in
+> 13s`) while the NAD CRD/controller is still starting. Re-run the `oc apply` once —
+> it is idempotent and the NAD lands on the second pass.
+
 - **NFS server** is external (the NAS) — nothing to recreate on cluster nodes. After a
   rebuild, just confirm `nas01-80.syangsao.lab` resolves and the `/nfsshare/csidriver`
   export is reachable from the nodes that carry `bond0.80`.

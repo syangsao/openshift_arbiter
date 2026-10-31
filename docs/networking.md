@@ -2,7 +2,7 @@
 
 Node networking is managed declaratively with **NodeNetworkConfigurationPolicy**
 (NNCP) resources from the nmstate operator, plus two **NetworkAttachmentDefinition**
-(NAD) resources for OVN/multus. The canonical set lives in
+(NAD) resources for OVN/multus. The canonical set (4 NNCPs + 2 NADs) lives in
 [`../luke-network-config.yaml`](../luke-network-config.yaml) — apply it as a unit:
 
 > **Prerequisite — NMState instance:** the nmstate operator only registers the
@@ -10,7 +10,7 @@ Node networking is managed declaratively with **NodeNetworkConfigurationPolicy**
 > On a fresh install the operator pod runs but creates just the `nmstates` CRD and
 > waits; applying the NNCPs fails with `no matches for kind
 > "NodeNetworkConfigurationPolicy" in version "nmstate.io/v1"`. Create the default
-> instance first (idempotent):
+> instance first (idempotent) — see [operators.md §1a](operators.md#1a-create-the-nmstate-instance-required):
 
 ```bash
 cat <<'EOF' | oc apply -f -
@@ -31,7 +31,7 @@ oc create namespace mtv-test --dry-run=client -o yaml | oc apply -f -
 oc apply -f luke-network-config.yaml
 ```
 
-All five NNCPs should reach `Available: True`. Verify:
+All four NNCPs should reach `Available: True`. Verify:
 
 ```bash
 oc get nodenetworkconfigurationpolicy \
@@ -40,7 +40,7 @@ oc get nodenetworkconfigurationpolicy \
 
 ---
 
-## The five NNCPs
+## The four NNCPs
 
 ### 1. `br-vmdata` — OVS bridge for VM data (all nodes)
 
@@ -159,22 +159,6 @@ switch vlan.60_ovn_localnet_switch
 > `node-role.kubernetes.io/worker` is present (it is on luke because the control
 > nodes are dual-role). The bridge mapping only takes effect where the OVS bridge
 > exists.
-
-### 5. `arbiter-ext-mtu` — MTU 1500 on arbiter (OVN overlay)
-
-Sets MTU 1500 on the arbiter node's external interface, the OVS bond interface, and
-the `br-ex` bridge so the OVN overlay path is consistent.
-
-```yaml
-spec:
-  desiredState:
-    interfaces:
-    - { type: ethernet,     name: ens192, state: up, mtu: 1500 }
-    - { type: ovs-interface, name: bond0,  state: up, mtu: 1500 }
-    - { type: ovs-bridge,   name: br-ex,   state: up, mtu: 1500 }
-  maxUnavailable: 0
-  nodeSelector: { kubernetes.io/hostname: arbiter.syangsao.net }
-```
 
 ---
 

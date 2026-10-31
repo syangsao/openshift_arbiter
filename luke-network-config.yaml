@@ -138,33 +138,6 @@ spec:
     node-role.kubernetes.io/worker: ""
 
 ---
-# NNCP: Jumbo frames on arbiter (OVN overlay MTU)
-apiVersion: nmstate.io/v1
-kind: NodeNetworkConfigurationPolicy
-metadata:
-  name: arbiter-ext-mtu
-  labels:
-    purpose: ovn-overlay-mtu
-spec:
-  desiredState:
-    interfaces:
-    - mtu: 1500
-      name: ens192
-      state: up
-      type: ethernet
-    - mtu: 1500
-      name: bond0
-      state: up
-      type: ovs-interface
-    - mtu: 1500
-      name: br-ex
-      state: up
-      type: ovs-bridge
-  maxUnavailable: 0
-  nodeSelector:
-    kubernetes.io/hostname: arbiter.syangsao.net
-
----
 # NAD: vlan-60 in default namespace (OVN localnet - used by existing VMs)
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition

@@ -143,7 +143,7 @@ spec:
   source:
     repoURL: 'https://github.com/syangsao/openshift_arbiter.git'
     targetRevision: main
-    path: luke-network-config.yaml   # the 5 NNCPs + 2 NADs
+    path: luke-network-config.yaml   # the 4 NNCPs + 2 NADs
   destination: { server: 'https://kubernetes.default.svc' }   # cluster-scoped
   syncPolicy:
     automated: { prune: true, selfHeal: true }

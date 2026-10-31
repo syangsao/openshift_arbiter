@@ -6,7 +6,7 @@ a rebuild restores the exact same versions.
 
 | Operator | Namespace | Subscription | Channel | Pinned CSV |
 |----------|-----------|--------------|---------|------------|
-| Kubernetes NMState (NNCP) | `openshift-nmstate` | `kubernetes-nmstate-operator` | `stable` | `kubernetes-nmstate-operator.4.22.0-202609090959` |
+| Kubernetes NMState (NNCP) | `openshift-nmstate` | `kubernetes-nmstate-operator` | `stable` | `kubernetes-nmstate-operator.4.22.0-202610241757` |
 | OpenShift Virtualization (HCO) | `openshift-cnv` | `kubevirt-hyperconverged` | `stable` | `kubevirt-hyperconverged-operator.v4.22.9` |
 | Migration Toolkit for Virtualization | `openshift-mtv` | `mtv-operator` | `release-v2.12` | `mtv-operator.v2.12.8` |
 
@@ -58,7 +58,7 @@ spec:
   name: kubernetes-nmstate-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: kubernetes-nmstate-operator.4.22.0-202609090959
+  startingCSV: kubernetes-nmstate-operator.4.22.0-202610241757
 EOF
 ```
 
@@ -69,6 +69,33 @@ oc get csv -n openshift-nmstate -w
 # NAME                                        PHASE
 # kubernetes-nmstate-operator.4.22.0-...     Succeeded
 ```
+
+> **Note:** on a fresh install OLM auto-provisions the `openshift-nmstate`
+> namespace and an `OperatorGroup` for it — the manual OperatorGroup loop above is
+> only needed if the group is missing (catalog-operator log: `found 0 operatorGroups,
+> expected 1`).
+
+### 1a. Create the NMState instance (required)
+
+The operator registers the `NodeNetworkConfigurationPolicy` CRD **only after** an
+`NMState` custom resource exists. On a fresh install the operator pod runs but
+creates just the `nmstates` CRD and waits; applying any NNCP fails with `no matches
+for kind "NodeNetworkConfigurationPolicy"`. Create the default instance (idempotent):
+
+```bash
+cat <<'EOF' | oc apply -f -
+apiVersion: nmstate.io/v1
+kind: NMState
+metadata:
+  name: cluster
+spec: {}
+EOF
+# confirm the NNCP CRD is now registered before applying any NNCPs:
+oc get crd nodenetworkconfigurationpolicies.nmstate.io
+```
+
+> **Rebuild note:** this instance is non-idempotent across rebuilds — it must be
+> (re)created after every rebuild, before [networking.md](networking.md).
 
 ---
 
@@ -95,6 +122,14 @@ spec:
   startingCSV: kubevirt-hyperconverged-operator.v4.22.9
 EOF
 ```
+
+> **Fresh-install note (observed 2026-10-31):** on a fresh cluster OLM resolved
+> the `kubevirt-hyperconverged` subscription to the *latest* stable CSV
+> (`v4.22.12`) even with `startingCSV: v4.22.9` pinned — it installed 4.22.9 and
+> immediately scheduled an upgrade to 4.22.12 (the same happened for MTV, which
+> went v2.12.8 → v2.12.10). The pin is not honored as a hard cap on a fresh
+> install; wait for the *upgraded* CSV to reach `Succeeded` before creating the
+> `HyperConverged` instance.
 
 Verify the operator pods are up:
 
@@ -221,6 +256,13 @@ done
 ```
 
 ## Rebuild note
+
+> **OperatorGroup timing (observed 2026-10-31):** on a fresh cluster the first
+> `oc apply` of an OperatorGroup into a just-created namespace can silently fail
+> (`namespaces "openshift-cnv" not found`) if the namespace object is not yet
+> served. Re-run the OperatorGroup apply after the namespace exists — without it
+> OLM creates no InstallPlan and the Subscription sits at `BundleUnpacking` with
+> no CSV ever appearing.
 
 All three subscriptions are idempotent — re-applying the same `startingCSV` after a
 rebuild restores the identical operator versions. The non-idempotent pieces are the
